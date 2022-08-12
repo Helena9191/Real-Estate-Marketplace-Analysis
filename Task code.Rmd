@@ -1,0 +1,224 @@
+---
+title: "RA Task Qianhui Fang"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+library(readr)
+library(tidyverse)
+library(lubridate)
+library(psych)
+library(usmap)
+library(kableExtra)
+library(stargazer)
+
+```
+
+```{r, include=FALSE}
+df = read_csv("selected_bargaining_data.csv")
+```
+
+### Task 1. Produce a summary statistics table at event level (note that our current data is at action-level). The table should include mean, standard deviation, minimum, median, and maximum. The variables to be summarized include property age (using the variable “built_year”), number of buyers (identified by unique “buyer_id”), number of seller revisions, duration until off market (using variable “off_market_date”, in days), and sales price (using the variable “de_sales_price”). ###
+\
+\
+```{r,echo=FALSE}
+df$listing_date  = (df$listing_date %>% str_split(pattern = ' ', simplify = T))[,1]%>% mdy()
+df$off_market_date = df$off_market_date %>% mdy()
+
+event_df = df %>% 
+  group_by(event_id) %>%
+  summarise(
+  
+  age = (year(off_market_date) - max(year_built)) %>% mean(na.rm = T),
+  buyer_nr = unique(buyer_id) %>% length(),
+  revision = unique(round_id) %>% length(),
+  dur = max(off_market_date - listing_date) %>% as.numeric(),
+  price = de_sales_price %>% max()
+  
+  ) %>% 
+  filter( (price %>% is.finite() )& (age >= 0)& (age < 200))
+
+
+stats_df = describe(event_df[,-1])[, c(3, 4, 8, 5, 9)] %>% as.data.frame() %>% round(digits = 2)
+
+rownames(stats_df) = c("Property Age", "Buyer Represented by the Platform", "Revisions", "Duration", "Sales Price")
+colnames(stats_df) = c("Mean", "Std.Dev.","Min", "Median", "Max")
+
+stats_df %>% kable()
+```
+\
+\
+By computing, the observations with missing price are removed. In addition, negative property ages have been considered unreasonable.\
+\
+From the output table, we can find that:\
+\
+ 1. The average property age is around 41 years but with a large SD value which means that the spread of ages is quite large, ranging from 32 to 156 years.\
+ \
+ 2. For most of the cases, each property has about 2 buyers.\
+ \
+ 3. More than half of the bargaining events end with between 1 to 3 rounds. There also exists an extreme case that reaches 10 rounds.\
+ \
+ 4. The mean of duration until off market is 40.64 days while the median is 15 days. The disparity shows that more than half of the properties are sold within 20 days. However, there is still many properties left unsold for a long time which leads to a higher mean.\
+ \
+ 5. The sales price ranges from 104335.3 USD to 1561797 USD with a median of 400652.1 USD.
+\
+\
+\
+\
+\
+
+
+
+
+### Task 2. Draw a map with all states in the U.S. to illustrate the geographical distribution of the bargaining events in the data sample. Use colors to represent the number of bargaining events from each state in our sample. A clear legend should be provided. ###
+\
+\
+```{r,include=FALSE}
+geo_df = df %>% 
+  select(event_id, censustract) %>% 
+  unique()
+
+geo_df$fips = geo_df$censustract %>% 
+  lapply(., function(x){
+  
+  x = as.character(x)
+  if(nchar(x) == 10){
+    return(substr(x, 1, 1))
+    
+  }else{
+    return(substr(x, 1, 2))
+  }
+  
+  }) %>% 
+  as.integer()
+
+event_state = geo_df %>%
+  group_by(fips) %>% 
+  summarise(nums = n())
+```
+
+```{r,echo=FALSE,fig.cap="The Geographical Distribution of Bargaining Events"}
+plot_usmap(data = event_state, regions ="states",values = "nums", labels = T,label_color = "white") + 
+  scale_fill_continuous(name = "Number of Bargaining Events") + 
+  theme(legend.position = "right") 
+```
+\
+\
+From the map, we can find that:\
+\
+1. California has 51 bargaining events which is the highest among four states.\
+\
+2. Washington state and Texas rank the second and the thrid, with 23 events and 21 events respectively.\
+\
+3. Most of the states from MidWest America are relatively less involved in bargaining events.\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+
+
+### Task 3. What factors can affect the final sales price of a property (“sales_price” in the data)? ###
+\
+\
+To improve the linearity, I first logged `price` to make sure the linearity for the regressions. From the plots, we can find that the distribution of `price` after the log transformation is more normally distributed.
+\
+\
+\
+```{r,fig.cap="Comparing log price and price by distribution",echo=FALSE,fig.height= 6, fig.width=10, message = FALSE, warning = FALSE}
+Xs = df %>% select(event_id, num_bathrooms, num_bedrooms, approx_sq_ft, walk_score, bike_score, lot_sq_ft, total_num_buyers_event, de_original_list_price) %>% unique() 
+
+model_df =left_join(event_df, Xs)[,-1] 
+
+model_df$num_bathrooms[is.na(model_df$num_bathrooms)]<-mean(model_df$num_bathrooms,na.rm=TRUE)
+model_df$num_bedrooms[is.na(model_df$num_bedrooms)]<-mean(model_df$num_bedrooms,na.rm=TRUE)
+model_df$approx_sq_ft[is.na(model_df$approx_sq_ft)]<-mean(model_df$approx_sq_ft,na.rm=TRUE)
+model_df$walk_score[is.na(model_df$walk_score)]<-mean(model_df$walk_score,na.rm=TRUE)
+model_df$bike_score[is.na(model_df$bike_score)]<-mean(model_df$bike_score,na.rm=TRUE)
+model_df$lot_sq_ft[is.na(model_df$lot_sq_ft)]<-mean(model_df$lot_sq_ft,na.rm=TRUE)
+model_df$total_num_buyers_event[is.na(model_df$total_num_buyers_event)]<-mean(model_df$total_num_buyers_event,na.rm=TRUE)
+
+par(mfrow = c(1,2))
+model_df$price %>% density()  %>% plot(xlab = "price",main = "Original Price Distribution")
+model_df$price %>% log() %>% density()  %>% plot(xlab = "log price", main = "Log Transformation")
+```
+\
+\
+I selected `num_bathroom`, `num_bedrooms`, `approx_sq_ft`, `walk_score`, `bike_score`, `lot_sq_ft`,`total_num_buyers_event`, `de_original_list_price`, `age`, `revision`, `buyer_nr`, and `dur` as factors which would possibly affect the sales price.\
+\
+Then, I joined everything at the event-level and replaced all the missing values in each column with the average of the rest.\
+\
+To conduct variable selection, I made a Full_model and applied stepwise regression. The result left me the variables that are statistically significant. I store the result of the stepwise regression into the Stepwise_model.\
+\
+Full_model: log(price) ~ age + buyer_nr + revision + dur + num_bathrooms + num_bedrooms + approx_sq_ft + walk_score + bike_score + lot_sq_ft + total_num_buyers_event + de_original_list_price\
+\
+Stepwise_model: log(price) ~ de_original_list_price + dur + total_num_buyers_event + lot_sq_ft + num_bedrooms + approx_sq_ft + walk_score\
+\
+\
+\
+\
+\
+\
+\
+\
+Below is the summary of the Stepwise_model:\
+```{r,echo=FALSE}
+Full_model = lm(log(price) ~., data = model_df)
+none = lm(log(price)~1, data=model_df)
+MSE = (summary(Full_model)$sigma)^2 
+Stepwise_model = step(none, scope=list(upper=Full_model), scale=MSE, trace = FALSE)
+summary(Stepwise_model)
+```
+\
+From the summary of the Stepwise_model, we can find that `lot_sq_ft` and `walk_score` are not statistically signifianct as their p-value is greater than 0.05. Therefore, I removed them from the model and stored the rest of the variabels in to the Restricted_model.\
+\
+Restricted_Model = log(price) ~ de_original_list_price + dur + total_num_buyers_event + num_bedrooms + approx_sq_ft\
+```{r, echo=FALSE}
+Restricted_model = lm(log(price)~de_original_list_price + dur + total_num_buyers_event + num_bedrooms + approx_sq_ft, data= model_df)
+summary(Restricted_model)
+```
+
+\
+Below is the regression output(Table 1) and my interpretation.\
+\
+According to the $R^2 = 0.905$, the model works quite well. About 91% variation of price could be explained by the
+predictors’ variation. Moreover, on average:\
+\
+1. Increasing the duration until off market by 1 day leads to a 0.1% decrease in the price of the property.\
+\
+2. Increasing the number of bedrooms by 1 day leads to a 5.5% decrease in the price of the property.\
+\
+3. Increasing the size of the living space in the house by 1 square feet leads to a 0.01% decrease in the price of the property.\
+\
+4. Increasing the number of bargaining events by 1 leads to a 1.4% decrease in the price of the property.\
+\
+5. The initial listing price the seller wants does not seem to affect the price of the property by a significant amount.\
+\
+6. The constant is fairly large compared to other variables. It means that we did not count in many potential factors which can affect the price.\
+\
+In conclusion, from the regression output, I found that the duration until off market, the number of bedrooms, the size of the living space, the number of bargaining events, and the initial listing price would affect the final sales price of a property.
+\
+```{r,echo=FALSE,results = 'asis'}
+stargazer(Full_model,Restricted_model, type = "latex", title = "Models")
+```
+
+
+```{r,echo=FALSE}
+write.csv(stats_df,"/Users/fangqianhui/Desktop/Datasets\ and\ Tasks/Summary_Statistics_Table.csv", row.names = TRUE)
+```
+
